@@ -37,6 +37,7 @@ public:
                                 int64_t param_num,
                                 common::ObExprTypeCtx &type_ctx) const override;
   static int eval_ai_embed(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res);
+  static int eval_ai_embed_batch(BATCH_EVAL_FUNC_ARG_DECL);
   virtual int cg_expr(ObExprCGCtx &expr_cg_ctx, 
                       const ObRawExpr &raw_expr,
                       ObExpr &rt_expr) const override;
@@ -45,6 +46,7 @@ private:
   static constexpr int MODEL_IDX = 0;
   static constexpr int CONTENT_IDX = 1;
   static constexpr int DIM_IDX = 2;
+  static constexpr int64_t MAX_EMBED_BATCH_SIZE = 64;
   DISALLOW_COPY_AND_ASSIGN(ObExprAIEmbed);
 };
 
