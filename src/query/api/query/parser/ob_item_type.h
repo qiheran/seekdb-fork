@@ -2279,6 +2279,15 @@ typedef enum ObItemType
   T_AI_COLUMN_SPEC = 4921,
   T_AI_WITH_OPTION = 4922,
   T_ALTER_AI_RETRY = 4923,
+  // for file table functions (file_sql)
+  T_READ_CSV_EXPR = 4924,
+  T_READ_JSON_EXPR = 4925,
+  T_READ_PARQUET_EXPR = 4926,
+  T_GLOB_EXPR = 4927,
+  T_FILE_TABLE_ARG = 4928,
+  T_COPY_STMT = 4929,
+  T_COPY_OPTION = 4930,
+  T_DESCRIBE_FILE_TABLE = 4931,
   T_MAX //Attention: add a new type before T_MAX
 } ObItemType;
 
