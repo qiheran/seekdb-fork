@@ -17624,7 +17624,7 @@ file_table_opt_alias:
   make_name_node(alias_node, result->malloc_pool_, "");
   $$ = alias_node;
 }
-| relation_name
+| NAME_OB
 {
   $$ = $1;
 }
@@ -17647,10 +17647,6 @@ file_table_named_arg
 
 file_table_named_arg:
 NAME_OB COMP_EQ simple_expr
-{
-  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_ARG, 2, $1, $3);
-}
-| NAME_OB COMP_EQ signed_literal
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_ARG, 2, $1, $3);
 }
