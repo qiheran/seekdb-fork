@@ -224,8 +224,8 @@ int ObDescribeFileTableResolver::resolve(const ParseNode &parse_tree)
           ObString arg_name(arg_node->children_[0]->str_len_, arg_node->children_[0]->str_value_);
           const ParseNode *val_node = arg_node->children_[1];
           if (arg_name.case_compare("header") == 0) {
-            if (T_BOOL_VALUE == val_node->type_ && NULL != val_node->children_[0]) {
-              has_header = val_node->children_[0]->value_ != 0;
+            if (T_BOOL_VALUE == val_node->type_) {
+              has_header = val_node->value_ != 0;
             } else if (T_INT == val_node->type_) {
               has_header = val_node->value_ != 0;
             } else {

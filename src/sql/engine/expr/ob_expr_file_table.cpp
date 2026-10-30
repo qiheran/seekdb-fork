@@ -49,7 +49,7 @@ int ObFileTableExtraInfo::deep_copy(common::ObIAllocator &allocator,
 }
 
 ObExprFileTable::ObExprFileTable(ObIAllocator &alloc, ObExprOperatorType type, const char *name)
-    : ObFuncExprOperator(alloc, type, name, ONE, NOT_VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
+    : ObFuncExprOperator(alloc, type, name, 4, NOT_VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
 {
   disable_operand_auto_cast();
 }
