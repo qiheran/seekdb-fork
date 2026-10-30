@@ -100,6 +100,7 @@
 #include "sql/resolver/dcl/ob_alter_role_stmt.h"
 #include "sql/resolver/cmd/ob_merge_table_stmt.h"
 #include "sql/engine/cmd/ob_merge_table_executor.h"
+#include "sql/engine/cmd/ob_copy_executor.h"
 
 namespace oceanbase
 {
@@ -430,6 +431,10 @@ int ObCmdExecutor::execute(ObExecContext &ctx, ObICmd &cmd)
       }
       case stmt::T_LOAD_DATA: {
         DEFINE_EXECUTE_CMD(ObLoadDataStmt, ObLoadDataExecutor);
+        break;
+      }
+      case stmt::T_COPY: {
+        DEFINE_EXECUTE_CMD(ObCopyStmt, ObCopyExecutor);
         break;
       }
       case stmt::T_KILL: {

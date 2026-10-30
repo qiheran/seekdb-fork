@@ -47,6 +47,16 @@ namespace sql
     }
   };
 
+  class ObDescribeFileTableResolver : public ObDMLResolver
+  {
+  public:
+    ObDescribeFileTableResolver(ObResolverParams &params)
+      : ObDMLResolver(params)
+    {}
+    virtual ~ObDescribeFileTableResolver() {}
+    virtual int resolve(const ParseNode &parse_tree);
+  };
+
 }
 }
 #endif

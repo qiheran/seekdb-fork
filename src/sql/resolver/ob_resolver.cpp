@@ -476,6 +476,14 @@ int ObResolver::resolve(IsPrepared if_prepared, const ParseNode &parse_tree, ObS
         REGISTER_STMT_RESOLVER(Explain);
         break;
       }
+      case T_DESCRIBE_FILE_TABLE: {
+        REGISTER_STMT_RESOLVER(DescribeFileTable);
+        break;
+      }
+      case T_COPY: {
+        REGISTER_STMT_RESOLVER(Copy);
+        break;
+      }
       case T_ALTER_SYSTEM_SET: {
         REGISTER_STMT_RESOLVER(AlterSystemSet);
         break;
