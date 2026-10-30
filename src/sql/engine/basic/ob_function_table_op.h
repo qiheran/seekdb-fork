@@ -20,6 +20,8 @@
 #include "sql/engine/ob_operator.h"
 #include "sql/engine/basic/ob_chunk_datum_store.h"
 #include "lib/charset/ob_charset.h"
+#include "lib/allocator/ob_arena_allocator.h"
+#include "lib/container/ob_array.h"
 
 namespace oceanbase
 {
@@ -48,7 +50,9 @@ public:
     already_calc_(false),
     row_count_(0),
     col_count_(0),
-    value_table_(NULL) 
+    value_table_(NULL),
+    file_alloc_("FileTableOp", OB_MALLOC_NORMAL_BLOCK_SIZE, MTL_ID()),
+    file_inited_(false)
   {}
 
   virtual int inner_open() override;
@@ -60,6 +64,7 @@ public:
 private:
   int inner_get_next_row_udf();
   int inner_get_next_row_sys_func();
+  int inner_get_next_row_file();
   int get_current_result(common::ObObj &result);
   int64_t node_idx_;
   bool already_calc_;
@@ -67,6 +72,9 @@ private:
   int64_t col_count_;
   common::ObObj value_;
   pl::ObPLCollection *value_table_;
+  common::ObArenaAllocator file_alloc_;
+  bool file_inited_;
+  common::ObArray<common::ObNewRow> file_rows_;
   int (ObFunctionTableOp::*next_row_func_)();
 };
 

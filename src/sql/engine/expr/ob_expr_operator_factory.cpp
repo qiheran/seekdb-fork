@@ -420,6 +420,7 @@
 #include "sql/engine/expr/ob_expr_ai/ob_expr_ai_prompt.h"
 #include "sql/engine/expr/ob_expr_vector_similarity.h"
 #include "sql/engine/expr/ob_expr_lock_func.h"
+#include "sql/engine/expr/ob_expr_file_table.h"
 
 using namespace oceanbase::common;
 namespace oceanbase
@@ -1048,6 +1049,10 @@ void ObExprOperatorFactory::register_expr_operators()
     REG_OP(ObExprAIEmbed);
     REG_OP(ObExprAIRerank);
     REG_OP(ObExprAIPrompt);
+    REG_OP(ObExprReadCsv);
+    REG_OP(ObExprReadJson);
+    REG_OP(ObExprReadParquet);
+    REG_OP(ObExprGlob);
   }();
 }
 

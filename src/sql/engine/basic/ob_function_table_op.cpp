@@ -19,6 +19,7 @@
 #include "sql/engine/basic/ob_function_table_op.h"
 #include "sql/engine/ob_exec_context.h"
 #include "sql/engine/expr/ob_expr_lob_utils.h"
+#include "sql/engine/basic/ob_file_table_utils.h"
 
 
 namespace oceanbase
@@ -29,6 +30,12 @@ namespace sql
 
 OB_SERIALIZE_MEMBER((ObFunctionTableSpec, ObOpSpec), value_expr_, column_exprs_, has_correlated_expr_);
 
+static bool is_file_table_expr_type(ObItemType type)
+{
+  return T_READ_CSV_EXPR == type || T_READ_JSON_EXPR == type ||
+         T_READ_PARQUET_EXPR == type || T_GLOB_EXPR == type;
+}
+
 int ObFunctionTableOp::inner_open()
 {
   int ret = OB_SUCCESS;
@@ -36,6 +43,8 @@ int ObFunctionTableOp::inner_open()
   already_calc_ = false;
   if (OB_ISNULL(MY_SPEC.value_expr_)) {
     ret = OB_ERR_UNEXPECTED;
+  } else if (is_file_table_expr_type(MY_SPEC.value_expr_->type_)) {
+    next_row_func_ = &ObFunctionTableOp::inner_get_next_row_file;
   } else if (ObExtendType == MY_SPEC.value_expr_->datum_meta_.type_) {
     next_row_func_ = &ObFunctionTableOp::inner_get_next_row_udf;
   } else {
@@ -212,6 +221,85 @@ int ObFunctionTableOp::inner_get_next_row_sys_func()
   } else {
     MY_SPEC.column_exprs_.at(0)->locate_datum_for_write(eval_ctx_).set_datum(*value);
     MY_SPEC.column_exprs_.at(0)->set_evaluated_projected(eval_ctx_);
+  }
+  return ret;
+}
+
+int ObFunctionTableOp::inner_get_next_row_file()
+{
+  int ret = OB_SUCCESS;
+  clear_evaluated_flag();
+  if (OB_FAIL(ctx_.check_status())) {
+  } else if (!file_inited_) {
+    // decode canonical args: [path, header, sample_size, format]
+    ObFileTableFuncKind kind = FILE_FUNC_READ_CSV;
+    switch (MY_SPEC.value_expr_->type_) {
+      case T_READ_CSV_EXPR: kind = FILE_FUNC_READ_CSV; break;
+      case T_READ_JSON_EXPR: kind = FILE_FUNC_READ_JSON; break;
+      case T_READ_PARQUET_EXPR: kind = FILE_FUNC_READ_PARQUET; break;
+      case T_GLOB_EXPR: kind = FILE_FUNC_GLOB; break;
+      default:
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("unexpected file table expr type", K(ret), K(MY_SPEC.value_expr_->type_));
+        break;
+    }
+    ObString path;
+    bool has_header = false;
+    ObString format;
+    int64_t param_cnt = MY_SPEC.value_expr_->param_count_;
+    for (int64_t p = 0; OB_SUCC(ret) && p < 4 && p < param_cnt; ++p) {
+      ObDatum *d = NULL;
+      if (OB_FAIL(MY_SPEC.value_expr_->param_exprs_[p]->eval(eval_ctx_, d))) {
+        LOG_WARN("eval file table arg failed", K(ret), K(p));
+      } else if (OB_ISNULL(d) || d->is_null()) {
+        // absent arg
+      } else if (p == 0) {
+        path = d->get_string();
+      } else if (p == 1) {
+        has_header = d->get_int() != 0;
+      } else if (p == 3) {
+        format = d->get_string();
+      }
+    }
+    ObSEArray<ObFileTableColDef, 8> cols;
+    if (OB_FAIL(ret)) {
+    } else if (OB_FAIL(ObFileTableUtils::infer_schema(file_alloc_, kind, path, has_header, format, cols))) {
+      LOG_WARN("infer file table schema failed", K(ret), K(path));
+    } else if (cols.count() != MY_SPEC.column_exprs_.count()) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("file table column count mismatch", K(ret), K(cols.count()),
+               K(MY_SPEC.column_exprs_.count()));
+    } else if (OB_FAIL(ObFileTableUtils::scan_rows(file_alloc_, kind, path, has_header, format, cols, file_rows_))) {
+      LOG_WARN("scan file rows failed", K(ret), K(path));
+    } else {
+      row_count_ = file_rows_.count();
+      file_inited_ = true;
+    }
+  }
+  if (OB_SUCC(ret)) {
+    if (node_idx_ >= row_count_) {
+      ret = OB_ITER_END;
+    } else {
+      const ObNewRow &row = file_rows_.at(node_idx_++);
+      if (OB_UNLIKELY(MY_SPEC.column_exprs_.count() != row.count_)) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("row width mismatch", K(ret), K(row.count_), K(MY_SPEC.column_exprs_.count()));
+      } else {
+        for (int64_t i = 0; OB_SUCC(ret) && i < row.count_; ++i) {
+          ObExpr *expr = MY_SPEC.column_exprs_.at(i);
+          const ObObjDatumMapType &datum_map = expr->obj_datum_map_;
+          ObDatum &datum = expr->locate_datum_for_write(eval_ctx_);
+          if (row.cells_[i].is_null()) {
+            datum.set_null();
+          } else if (OB_FAIL(datum.from_obj(row.cells_[i], datum_map))) {
+            LOG_WARN("datum from obj failed", K(ret));
+          }
+          if (OB_SUCC(ret)) {
+            expr->set_evaluated_projected(eval_ctx_);
+          }
+        }
+      }
+    }
   }
   return ret;
 }
