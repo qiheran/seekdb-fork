@@ -35,6 +35,7 @@
 #include "sql/engine/expr/ob_expr_json_utils.h"
 #include "sql/engine/expr/ob_expr_array_map.h"
 #include "sql/engine/expr/ob_expr_ai/ob_ai_func.h"
+#include "sql/engine/expr/ob_expr_file_table.h"
 
 namespace oceanbase
 {
@@ -110,6 +111,10 @@ void ObExprExtraInfoFactory::register_expr_extra_infos()
   REG_EXTRA_INFO(T_FUN_SYS_AI_COMPLETE, ObAIFuncExprInfo);
   REG_EXTRA_INFO(T_FUN_SYS_AI_EMBED, ObAIFuncExprInfo);
   REG_EXTRA_INFO(T_FUN_SYS_AI_RERANK, ObAIFuncExprInfo);
+  REG_EXTRA_INFO(T_READ_CSV_EXPR, ObFileTableExtraInfo);
+  REG_EXTRA_INFO(T_READ_JSON_EXPR, ObFileTableExtraInfo);
+  REG_EXTRA_INFO(T_READ_PARQUET_EXPR, ObFileTableExtraInfo);
+  REG_EXTRA_INFO(T_GLOB_EXPR, ObFileTableExtraInfo);
 }
 
 } // end namespace sql
