@@ -2235,7 +2235,9 @@ int ObServer::init_schema()
       *schema_service_sql_impl_,
       *schema_refresh_scheduler_,
       schema_publish_signal_))) {
+    LOG_INFO("DEBUG bisect: schema_service_.init failed", K(ret));
   }
+  LOG_INFO("DEBUG bisect: leaving ObServer::init_schema", K(ret));
 
   return ret;
 }

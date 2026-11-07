@@ -103,6 +103,7 @@ int ObExprAIComplete::eval_ai_complete(const ObExpr &expr,
     ObAIFuncExprInfo *info = nullptr;
     ObString model_id = arg_model_id->get_string();
     ObString prompt;
+    ObString system_prompt;
     ObJsonObject *config = nullptr;
     ObString config_str;
     share::ObAiModelEndpointInfo resolved_endpoint;
@@ -124,16 +125,18 @@ int ObExprAIComplete::eval_ai_complete(const ObExpr &expr,
         ret = OB_INVALID_ARGUMENT;
         LOG_USER_ERROR(OB_INVALID_ARGUMENT, "prompt is not valid");
         res.set_null();
-      } else if (!ObAIFuncJsonUtils::ob_is_json_array_all_str(static_cast<ObJsonArray *>(prompt_object->get_value(ObAIFuncPromptObjectUtils::prompt_args_key)))) {
-        ret = OB_NOT_SUPPORTED;
-        LOG_USER_ERROR(OB_NOT_SUPPORTED, "prompt object is not support");
-      } else if (OB_FAIL(ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(temp_allocator, prompt_object, prompt))) {
+      } else if (OB_FAIL(ObAIFuncPromptObjectUtils::replace_all_args_in_template(temp_allocator, prompt_object, prompt))) {
+      }
+      // optional "system" field of the prompt object: sent as the system message
+      ObJsonNode *sys_node = prompt_object->get_value(ObString("system"));
+      if (OB_NOT_NULL(sys_node) && sys_node->json_type() == ObJsonNodeType::J_STRING) {
+        system_prompt = static_cast<ObJsonString *>(sys_node)->value();
       }
     } else if (OB_FAIL(ObTextStringHelper::read_real_string_data(ctx.exec_ctx_, temp_allocator, *arg_prompt, expr.args_[1]->datum_meta_, expr.args_[1]->obj_meta_.has_lob_header(), prompt))) {
     }
 
     if (OB_FAIL(ret)) {
-    } else if (OB_NOT_NULL(arg_config)) {
+    } else if (OB_NOT_NULL(arg_config) && !arg_config->is_null()) {
       if (OB_FAIL(ObTextStringHelper::read_real_string_data(ctx.exec_ctx_, temp_allocator, *arg_config, expr.args_[2]->datum_meta_, expr.args_[2]->obj_meta_.has_lob_header(), config_str))) {
       } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_object_form_str(temp_allocator, config_str, config))) {
       }
@@ -155,7 +158,8 @@ int ObExprAIComplete::eval_ai_complete(const ObExpr &expr,
     } else {
       ObAIFuncModel model(temp_allocator, *info, *endpoint_info);
       ObString result;
-      if (OB_FAIL(model.call_completion(prompt, config, result))) {
+      if (OB_FAIL(model.call_completion(prompt, config, result,
+                 system_prompt.empty() ? NULL : &system_prompt))) {
       } else if (OB_FAIL(ObAIFuncUtils::set_string_result(expr, ctx, res, result))) {
       }
     }

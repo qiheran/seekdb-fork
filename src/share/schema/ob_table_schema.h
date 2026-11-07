@@ -1052,6 +1052,7 @@ public:
   int set_compress_func_name(const char *compressor);
   int set_compress_func_name(const common::ObString &compressor);
   inline void set_dop(int64_t table_dop) { table_dop_ = table_dop; }
+  bool has_ai_column() const;
   template<typename ColumnType>
   int add_column(const ColumnType &column);
   int delete_column(const common::ObString &column_name);

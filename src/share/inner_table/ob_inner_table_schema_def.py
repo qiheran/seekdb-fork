@@ -2447,6 +2447,67 @@ all_ai_model_endpoint_def = dict(
 def_table_schema(**all_ai_model_endpoint_def)
 
 
+all_ai_column_def = dict(
+    owner = 'ai_column',
+    table_name = '__all_ai_column',
+    table_id = '1131',
+    table_type = 'SYSTEM_TABLE',
+    gm_columns = ['gmt_create', 'gmt_modified'],
+    rowkey_columns = [
+      ('table_id', 'int'),
+      ('column_id', 'int')
+    ],
+    is_cluster_private = False,
+    meta_record_in_sys = False,
+    normal_columns = [
+        ('database_id', 'int', 'false'),
+        ('column_name', 'varchar:OB_MAX_COLUMN_NAME_LENGTH', 'false'),
+        ('state_column_id', 'int', 'false'),
+        ('request_column_id', 'int', 'false'),
+        ('result_spec_column_id', 'int', 'false'),
+        ('state_column_name', 'varchar:OB_MAX_COLUMN_NAME_LENGTH', 'false'),
+        ('request_column_name', 'varchar:OB_MAX_COLUMN_NAME_LENGTH', 'false'),
+        ('result_spec_column_name', 'varchar:OB_MAX_COLUMN_NAME_LENGTH', 'false'),
+        ('ai_func_type', 'varchar:32', 'true'),
+        ('model_name', 'varchar:128', 'true'),
+        ('result_type', 'int', 'true'),
+        ('vector_dim', 'int', 'true', -1),
+        ('max_retries', 'int', 'false', 0),
+        ('sync_mode', 'varchar:16', 'false', 'async'),
+        ('normalized_expr', 'longtext', 'true'),
+        ('prompt_expr', 'longtext', 'true'),
+        ('spec_json', 'longtext', 'true'),
+        ('dep_column_ids', 'varchar:4096', 'true'),
+        ('schema_version', 'bigint', 'true')
+    ]
+)
+def_table_schema(**all_ai_column_def)
+
+
+all_ai_column_task_def = dict(
+    owner = 'ai_column',
+    table_name = '__all_ai_column_task',
+    table_id = '1132',
+    table_type = 'SYSTEM_TABLE',
+    gm_columns = ['gmt_create', 'gmt_modified'],
+    rowkey_columns = [
+      ('table_id', 'int'),
+      ('column_id', 'int'),
+      ('rowkey_predicate', 'varchar:4096')
+    ],
+    is_cluster_private = False,
+    meta_record_in_sys = False,
+    normal_columns = [
+        ('request_id', 'varchar:4096', 'false'),
+        ('state', 'int', 'false', 0),
+        ('retry_count', 'int', 'false', 0),
+        ('max_retries', 'int', 'false', 0),
+        ('eligible_ts', 'timestamp:6', 'true')
+    ]
+)
+def_table_schema(**all_ai_column_task_def)
+
+
 all_objauth_mysql_def = dict(
     owner = 'cjl476581',
     table_name     = '__all_objauth_mysql',

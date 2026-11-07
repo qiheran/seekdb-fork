@@ -352,7 +352,8 @@ public:
   {}
    virtual ~ObAIFuncModel() {}
    // completion
-   int call_completion(ObString &prompt, ObJsonObject *config, ObString &result);
+   int call_completion(ObString &prompt, ObJsonObject *config, ObString &result,
+                       const ObString *system_prompt = NULL);
    int call_completion_vector(ObArray<ObString> &prompts, ObJsonObject *config, ObArray<ObString> &results);
    // dense_embedding
    int call_dense_embedding(ObString &content, ObJsonObject *config, ObString &result);
@@ -377,7 +378,7 @@ public:
   ObAIFuncPromptObjectUtils() {}
   virtual ~ObAIFuncPromptObjectUtils() {}
   static bool is_valid_prompt_object(ObJsonObject* prompt_object);
-  static int replace_all_str_args_in_template(ObIAllocator &allocator, ObJsonObject* prompt_object, ObString& replaced_prompt_str);
+  static int replace_all_args_in_template(ObIAllocator &allocator, ObJsonObject* prompt_object, ObString& replaced_prompt_str);
   static int construct_prompt_object(ObIAllocator &allocator, ObString &template_str, ObJsonArray *args_array, ObJsonObject *&prompt_object);
   static constexpr char prompt_template_key[20] = "template";
   static constexpr char prompt_args_key[20] = "args";

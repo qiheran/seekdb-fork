@@ -15,6 +15,9 @@
  */
 
 #define USING_LOG_PREFIX SQL_RESV
+#include "common/mysqlclient/ob_mysql_proxy.h"
+#include "share/ob_server_struct.h"
+#include "share/schema/ob_ai_column_meta.h"
 #include "sql/resolver/dml/ob_update_resolver.h"
 
 namespace oceanbase
@@ -109,6 +112,13 @@ int ObUpdateResolver::resolve(const ParseNode &parse_tree)
     // Parse cascading update columns
     if (OB_FAIL(resolve_additional_assignments(tables_assign,
                                                T_UPDATE_SCOPE))) {
+    }
+  }
+
+  if (OB_SUCC(ret)) {
+    // AI column invalidation: an update that touches a dependency or rowkey
+    // column of an AI column clears the AI result column in the same update.
+    if (OB_FAIL(add_ai_column_invalidation(tables_assign))) {
     }
   }
 
@@ -530,6 +540,163 @@ int ObUpdateResolver::resolve_update_constraints()
           if (OB_FAIL(ObTableAssignment::expand_expr(*params_.expr_factory_,
                                                      table_info->assignments_,
                                                      table_info->view_check_exprs_.at(j)))) {
+          }
+        }
+      }
+    }
+  }
+  return ret;
+}
+
+int ObUpdateResolver::add_ai_column_invalidation(
+    common::ObIArray<ObTableAssignment> &tables_assign)
+{
+  int ret = OB_SUCCESS;
+  ObUpdateStmt *stmt = get_update_stmt();
+  if (OB_ISNULL(stmt) || OB_ISNULL(schema_checker_) || OB_ISNULL(params_.expr_factory_)
+      || OB_ISNULL(params_.session_info_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else {
+    for (int64_t i = 0; OB_SUCC(ret) && i < tables_assign.count(); ++i) {
+      ObTableAssignment &table_assign = tables_assign.at(i);
+      const TableItem *table_item = stmt->get_table_item_by_id(table_assign.table_id_);
+      const ObTableSchema *ts = nullptr;
+      if (OB_ISNULL(table_item)) {
+        // multi-table update: skip
+      } else if (OB_FAIL(schema_checker_->get_table_schema(
+                        table_item->get_base_table_item().ref_id_, ts))) {
+      } else if (OB_ISNULL(ts) || !ts->is_user_table()) {
+      } else {
+        common::ObSEArray<uint64_t, 4> dep_ids;
+        common::ObSEArray<uint64_t, 4> ai_result_ids;
+        common::ObArray<uint64_t> rk_ids;
+        if (OB_FAIL(ts->get_rowkey_column_ids(rk_ids))) {
+          LOG_WARN("get rowkey ids failed", K(ret));
+          ret = OB_SUCCESS;
+        }
+        // The in-memory column schema does not carry the serialized ai_meta_;
+        // read the AI column metadata from __all_ai_column via the tenant SQL
+        // proxy (committed DDL data).
+        common::ObMySQLProxy *ai_proxy = GCTX.sql_proxy_;
+        if (OB_NOT_NULL(ai_proxy)) {
+          common::ObSqlString msql;
+          common::ObMySQLProxy::MySQLResult mres;
+          if (OB_FAIL(msql.assign_fmt(
+                  "SELECT column_id AS column_id, dep_column_ids AS deps "
+                  "FROM oceanbase.__all_ai_column WHERE table_id = %lu",
+                  static_cast<unsigned long>(ts->get_table_id())))) {
+            ret = OB_SUCCESS;
+          } else if (OB_FAIL(ai_proxy->read(mres, msql.ptr(), nullptr))) {
+            LOG_WARN("read ai column meta failed", K(ret), K(msql));
+            ret = OB_SUCCESS;
+          } else if (OB_NOT_NULL(mres.get_result())) {
+            sqlclient::ObMySQLResult *mr_ = mres.get_result();
+            int mq = OB_SUCCESS;
+            while (OB_SUCCESS == (mq = mr_->next())) {
+              int64_t m_cid = 0;
+              common::ObString m_deps;
+              if (OB_FAIL(mr_->get_int("column_id", m_cid))) {
+                LOG_WARN("get ai meta column_id failed", K(ret));
+              } else if (OB_FAIL(mr_->get_varchar("deps", m_deps))) {
+                LOG_WARN("get ai meta deps failed", K(ret));
+              } else {
+                if (m_cid > 0 && !has_exist_in_array(ai_result_ids, static_cast<uint64_t>(m_cid))) {
+                  if (OB_SUCCESS != ai_result_ids.push_back(static_cast<uint64_t>(m_cid))) { }
+                }
+                int64_t dep_start = 0;
+                for (int64_t di = 0; di <= m_deps.length(); ++di) {
+                  if (di == m_deps.length() || m_deps[di] == ',') {
+                    if (di > dep_start) {
+                      uint64_t dep = strtoull(m_deps.ptr() + dep_start, NULL, 10);
+                      if (dep > 0 && !has_exist_in_array(dep_ids, dep)) {
+                        if (OB_SUCCESS != dep_ids.push_back(dep)) { }
+                      }
+                    }
+                    dep_start = di + 1;
+                  }
+                }
+              }
+            }
+            if (OB_SUCCESS != mq && common::OB_ITER_END != mq) {
+              LOG_WARN("iterate ai column meta failed", K(mq));
+            }
+            (void)mr_->close();
+            mres.reset();
+          }
+        }
+        for (int64_t ri = 0; OB_SUCC(ret) && ri < rk_ids.count(); ++ri) {
+          if (!has_exist_in_array(dep_ids, rk_ids.at(ri))) {
+            if (OB_SUCCESS != dep_ids.push_back(rk_ids.at(ri))) { }
+          }
+        }
+        bool trigger = false;
+        for (int64_t ai = 0; OB_SUCC(ret) && !trigger && ai < table_assign.assignments_.count(); ++ai) {
+          const ObAssignment &asg = table_assign.assignments_.at(ai);
+          if (OB_NOT_NULL(asg.column_expr_)
+              && has_exist_in_array(dep_ids, asg.column_expr_->get_column_id())) {
+            trigger = true;
+          }
+        }
+        if (OB_SUCC(ret) && trigger) {
+          for (int64_t ac = 0; OB_SUCC(ret) && ac < ai_result_ids.count(); ++ac) {
+            const ObColumnSchemaV2 *res_col = ts->get_column_schema(ai_result_ids.at(ac));
+            bool already = false;
+            for (int64_t ai = 0; !already && ai < table_assign.assignments_.count(); ++ai) {
+              already = OB_NOT_NULL(table_assign.assignments_.at(ai).column_expr_)
+                  && table_assign.assignments_.at(ai).column_expr_->get_column_id()
+                        == ai_result_ids.at(ac);
+            }
+            if (already || OB_ISNULL(res_col)) {
+              continue;
+            }
+            // Register the AI result column in the statement and assign its
+            // (typed) DEFAULT - i.e. NULL - exactly like the hidden-pk and
+            // on-update implicit assignments do.
+            ObSEArray<ObColumnRefRawExpr *, 1> col_exprs;
+            ObColumnRefRawExpr *col_expr = nullptr;
+            ColumnItem *col_item = nullptr;
+            ObRawExpr *default_expr = nullptr;
+            if (OB_FAIL(add_column_to_stmt(*table_item, *res_col, col_exprs))) {
+              LOG_WARN("add ai result column to stmt failed", K(ret));
+            } else if (col_exprs.empty() || OB_ISNULL(col_expr = col_exprs.at(0))) {
+              ret = OB_ERR_UNEXPECTED;
+            } else if (OB_ISNULL(col_item = get_stmt()->get_column_item_by_id(
+                          table_item->table_id_, res_col->get_column_id()))) {
+              ret = OB_ERR_UNEXPECTED;
+            } else if (OB_ISNULL(params_.expr_factory_)) {
+              ret = OB_ERR_UNEXPECTED;
+            } else {
+              ObConstRawExpr *c_expr = nullptr;
+              if (OB_FAIL(params_.expr_factory_->create_raw_expr(T_DEFAULT, c_expr))) {
+                LOG_WARN("create default expr failed", K(ret));
+              } else if (OB_ISNULL(c_expr)) {
+                ret = OB_ERR_UNEXPECTED;
+              } else {
+                ObObj null_val;
+                null_val.set_null();
+                c_expr->set_value(null_val);
+                default_expr = c_expr;
+              }
+            }
+            if (OB_FAIL(ret)) {
+              LOG_WARN("build ai null default failed", K(ret));
+            } else {
+              ObDefaultValueUtils def_utils(get_stmt(), &params_, this);
+              if (OB_FAIL(def_utils.resolve_default_expr(*col_item, default_expr, T_UPDATE_SCOPE))) {
+                LOG_WARN("resolve ai column default (null) expr failed", K(ret));
+              } else {
+                ObAssignment new_assign;
+                new_assign.column_expr_ = col_item->expr_;
+                new_assign.expr_ = default_expr;
+                new_assign.is_implicit_ = true;
+                if (OB_SUCCESS != table_assign.assignments_.push_back(new_assign)) {
+                  LOG_WARN("push ai invalidation assignment failed");
+                } else {
+                  LOG_INFO("AICOL_UPDATE_INVALIDATE", "table", ts->get_table_name_str(),
+                           "col", res_col->get_column_name_str());
+                }
+              }
+            }
           }
         }
       }

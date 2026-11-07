@@ -248,7 +248,12 @@ OB_INLINE int ObTableDeleteOp::delete_row_to_das()
         break;
       } else if (OB_FAIL(calc_tablet_loc(del_ctdef, del_rtdef, tablet_loc))) {
       } else if (OB_FAIL(ObDMLService::delete_row(del_ctdef, del_rtdef, tablet_loc, dml_rtctx_, modify_row.old_row_))) {
-      } else if (need_after_row_process(del_ctdef) && OB_FAIL(dml_modify_rows_.push_back(modify_row))) {
+      } else if ((need_after_row_process(del_ctdef) || ai_capture_on_)) {
+        int ai_cap = ai_capture_rowkey(modify_row);
+        if (OB_SUCCESS != ai_cap) { LOG_WARN("ai col capture failed", K(ai_cap)); }
+        if (!need_after_row_process(del_ctdef)) {
+          ++del_rtdef.cur_row_num_;
+        }
       } else {
         ++del_rtdef.cur_row_num_;
       }

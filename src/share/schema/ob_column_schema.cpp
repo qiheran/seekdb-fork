@@ -76,12 +76,14 @@ int ObColumnSchemaV2::assign(const ObColumnSchemaV2 &src_schema)
     udt_set_id_ = src_schema.udt_set_id_;
     sub_type_ = src_schema.sub_type_;
     skip_index_attr_ = src_schema.skip_index_attr_;
+    is_ai_column_ = src_schema.is_ai_column_;
     lob_chunk_size_ = src_schema.lob_chunk_size_;
 
     if (OB_FAIL(deep_copy_obj(src_schema.orig_default_value_, orig_default_value_))) {
     } else if (OB_FAIL(deep_copy_obj(src_schema.cur_default_value_, cur_default_value_))) {
     } else if (OB_FAIL(deep_copy_str(src_schema.column_name_, column_name_))) {
     } else if (OB_FAIL(deep_copy_str(src_schema.comment_, comment_))) {
+    } else if (OB_FAIL(deep_copy_str(src_schema.ai_meta_, ai_meta_))) {
     } else if (OB_FAIL(set_extended_type_info(src_schema.extended_type_info_))) {
     } else if (src_schema.column_ref_idxs_ != NULL) {
       if (OB_FAIL(alloc_column_ref_set())) {
@@ -188,6 +190,8 @@ void ObColumnSchemaV2::reset()
   skip_index_attr_.reset();
   lob_chunk_size_ = OB_DEFAULT_LOB_CHUNK_SIZE;
   local_session_vars_.reset();
+  is_ai_column_ = false;
+  ai_meta_.reset();
   ObSchema::reset();
 }
 
@@ -235,7 +239,9 @@ OB_DEF_SERIALIZE(ObColumnSchemaV2)
                 sub_type_,
                 skip_index_attr_,
                 lob_chunk_size_,
-                local_session_vars_);
+                local_session_vars_,
+                is_ai_column_,
+                ai_meta_);
   }
 
   return ret;
@@ -249,6 +255,8 @@ OB_DEF_DESERIALIZE(ObColumnSchemaV2)
   ObString column_name;
   ObString comment;
   bool has_column_ref = false;
+  ObString ai_meta;
+  bool is_ai_column = false;
 
   LST_DO_CODE(OB_UNIS_DECODE,
               table_id_,
@@ -295,7 +303,13 @@ OB_DEF_DESERIALIZE(ObColumnSchemaV2)
                 sub_type_,
                 skip_index_attr_,
                 lob_chunk_size_,
-                local_session_vars_);
+                local_session_vars_,
+                is_ai_column_,
+                ai_meta);
+    if (OB_FAIL(ret)) {
+    } else {
+      ret = deep_copy_str(ai_meta, ai_meta_);
+    }
   }
   return ret;
 }
@@ -340,7 +354,9 @@ OB_DEF_SERIALIZE_SIZE(ObColumnSchemaV2)
               sub_type_,
               skip_index_attr_,
               lob_chunk_size_,
-              local_session_vars_);
+              local_session_vars_,
+              is_ai_column_,
+              ai_meta_);
   return len;
 }
 

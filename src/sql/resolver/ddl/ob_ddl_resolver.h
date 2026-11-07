@@ -518,6 +518,12 @@ protected:
       const bool unused_flag = false,
       const bool is_create_table_as = false,
       const bool allow_has_default = true);
+  int resolve_ai_column_spec(
+      share::schema::ObColumnSchemaV2 &column,
+      ParseNode &spec_node,
+      const bool is_vector_col,
+      const int64_t vector_dim,
+      const ObTableSchema &table_schema);
   int drop_not_null_constraint(const share::schema::ObColumnSchemaV2 &column);
   int resolve_normal_column_attribute_constr_not_null(ObColumnSchemaV2 &column,
                                                       ParseNode *attrs_node,

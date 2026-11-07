@@ -225,6 +225,27 @@ public:
   }
 
 public:
+  // AI column task reconciliation: per-row predicates captured at row time
+  int ai_capture_rowkey(const ObDMLModifyRowNode &node);
+  bool ai_capture_on_ = false;
+  common::ObSEArray<common::ObSqlString, 4> ai_rowkey_preds_;
+  common::ObSEArray<common::ObSqlString, 4> ai_del_preds_;
+  // AI column metadata + dependency gate (loaded from the schema guard at
+  // inner_open; no SQL involved).
+  int ai_load_ai_meta(const share::schema::ObTableSchema &ts, const ObDMLBaseCtDef *ctdef);
+  int ai_reconcile_das(uint64_t table_id);
+  bool ai_meta_loaded_ = false;
+  bool ai_dep_gate_ = false;
+  uint32_t ai_req_seq_ = 0;
+  common::ObSEArray<uint64_t, 4> ai_dep_col_ids_;
+  common::ObSEArray<uint64_t, 4> ai_meta_col_ids_;
+  common::ObSEArray<int64_t, 4> ai_meta_max_retries_;
+  common::ObSEArray<common::ObString, 4> ai_meta_res_cols_;
+  common::ObSEArray<common::ObString, 4> ai_meta_exprs_;
+  common::ObSEArray<common::ObString, 4> ai_meta_prompt_exprs_;
+  common::ObSEArray<common::ObString, 4> ai_meta_models_;
+  common::ObSEArray<int64_t, 4> ai_meta_rtypes_;
+  common::ObSEArray<common::ObString, 4> ai_meta_ftypes_;
   int open_inner_conn();
   int close_inner_conn();
   int begin_nested_session(bool skip_cur_stmt_tables);

@@ -1071,18 +1071,29 @@ int ObMultiVersionSchemaService::init(
   } else if (OB_FAIL(ObServerSchemaService::init(
       sql_proxy, schema_status_proxy, service_status,
       in_bootstrap, schema_backend))) {
+    LOG_INFO("DEBUG bisect: ObServerSchemaService::init failed", K(ret));
   } else if (OB_FAIL(schema_fetcher_.init(schema_service_, sql_proxy))) {
+    LOG_INFO("DEBUG bisect: schema_fetcher_.init failed", K(ret));
   } else if (OB_FAIL(schema_cache_.init())) {
+    LOG_INFO("DEBUG bisect: schema_cache_.init failed", K(ret));
   } else if (OB_FAIL(schema_mgr_cache_.init(init_version_count))) {
+    LOG_INFO("DEBUG bisect: schema_mgr_cache_.init failed", K(ret));
   } else if (OB_FAIL(ddl_trans_controller_.init(this))) {
+    LOG_INFO("DEBUG bisect: ddl_trans_controller_.init failed", K(ret));
   } else if (OB_FAIL(ddl_epoch_mgr_.init(sql_proxy, this))) {
+    LOG_INFO("DEBUG bisect: ddl_epoch_mgr_.init failed", K(ret));
   } else {
+    LOG_INFO("DEBUG bisect: all sub-inits passed");
     // init sys schema struct
     init_version_cnt_ = init_version_count;
     if (OB_FAIL(init_multi_version_schema_struct())) {
+      LOG_INFO("DEBUG bisect: init_multi_version_schema_struct failed", K(ret));
     } else if (OB_FAIL(init_system_runtime_user_schema())) {
+      LOG_INFO("DEBUG bisect: init_system_runtime_user_schema failed", K(ret));
     } else if (OB_FAIL(init_original_schema())) {
+      LOG_INFO("DEBUG bisect: init_original_schema failed", K(ret));
     }
+    LOG_INFO("DEBUG bisect: leaving init", K(ret));
   }
 
   return ret;

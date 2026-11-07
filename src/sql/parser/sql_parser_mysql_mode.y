@@ -14,11 +14,12 @@
  * limitations under the License.
  */
 
+%expect 0
+%lex-param {void *YYLEX_PARAM}
 %define api.pure
 %parse-param {ParseResult *result}
 %name-prefix "obsql_mysql_yy"
 %locations
-%verbose
 %error-verbose
 %code requires {
 #include "parse_node.h"
@@ -37,8 +38,8 @@
 }
 
 %{
-#include "../../../src/sql/parser/sql_parser_mysql_mode_lex.h"
-#include "../../../src/sql/parser/sql_parser_base.h"
+#include "sql/parser/sql_parser_mysql_mode_lex.h"
+#include "sql/parser/sql_parser_base.h"
 
 #define GEN_EXPLAN_STMT(no_use, explain_stmt, explain_type, display_type, stmt, into_table, set_statement_id) \
   (void)(no_use); \
@@ -444,6 +445,7 @@ END_P SET_VAR DELIMITER
 %type <node> opt_priority opt_low_priority delete_option delete_option_list opt_delete_option_list
 %type <node> opt_work begin_stmt commit_stmt rollback_stmt opt_ignore opt_ignore_or_replace ignore_or_replace alter_table_stmt alter_table_actions alter_table_action_list alter_table_action alter_column_option alter_index_option alter_constraint_option standalone_alter_action alter_partition_option opt_to opt_table
 %type <node> alter_column_behavior opt_set opt_position_column
+%type <node> opt_ai_column_spec opt_ai_with_options ai_with_options ai_with_option
 %type <node> alter_system_stmt alter_system_set_parameter_actions alter_system_settp_actions settp_option alter_system_set_parameter_action alter_system_reset_parameter_actions alter_system_reset_parameter_action
 %type <node> opt_comment opt_as
 %type <node> column_name relation_name relation_name_list function_name column_label var_name relation_name_or_string row_format_option compression_name
@@ -482,7 +484,6 @@ END_P SET_VAR DELIMITER
 %type <node> alter_foreign_key_action
 %type <node> analyze_stmt for_all opt_indexed_hiddden opt_size_clause size_clause for_columns for_columns_list for_columns_item column_clause
 %type <node> optimize_stmt
-%type <node> dump_memory_stmt
 %type <node> create_savepoint_stmt rollback_savepoint_stmt release_savepoint_stmt
 %type <node> opt_qb_name opt_qb_name_list_with_quotes parallel_hint pq_set_hint_desc pq_subquery_hint_desc
 %type <node> get_format_unit
@@ -649,7 +650,6 @@ stmt:
   | load_data_stmt          { $$ = $1; check_question_mark($$, result); }
   | optimize_stmt     { $$ = $1; check_question_mark($$, result); }
   | flush_privileges_stmt { $$ = $1; check_question_mark($$, result); }
-  | dump_memory_stmt  { $$ = $1; check_question_mark($$, result); }
   | get_diagnostics_stmt    { $$ = $1; question_mark_issue($$, result); }
   | pl_expr_stmt            { $$ = $1; question_mark_issue($$, result); }
   | method_opt
@@ -4832,13 +4832,13 @@ SIMPLE { $$[0] = T_SIMPLE; }
 ;
 
 column_definition:
-column_definition_ref data_type opt_column_attribute_list opt_column_reference opt_position_column
+column_definition_ref data_type opt_column_attribute_list opt_column_reference opt_position_column opt_ai_column_spec
 {
   (void)($4);
   ParseNode *attributes = NULL;
   merge_nodes(attributes, result, T_COLUMN_ATTRIBUTES, $3);
   set_data_type_collation($2, attributes, false, true);
-  malloc_non_terminal_node($$, result->malloc_pool_, T_COLUMN_DEFINITION, 4, $1, $2, attributes, $5);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_COLUMN_DEFINITION, 5, $1, $2, attributes, $5, $6);
 }
 | column_definition_ref data_type opt_collation opt_generated_keyname AS '(' expr ')' opt_storage_type opt_generated_column_attribute_list opt_column_reference opt_position_column
 {
@@ -15234,6 +15234,51 @@ ADD COLUMN column_definition
 /* we don't have table constraint, so ignore it */
 ;
 
+
+opt_ai_column_spec:
+{
+  $$ = NULL;
+}
+| AI COLUMN '(' expr ')' opt_ai_with_options
+{
+  (void)($2);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN_SPEC, 2, $4, $6);
+  dup_expr_string($4, result, @4.first_column, @4.last_column);
+}
+;
+
+opt_ai_with_options:
+{
+  $$ = NULL;
+}
+| WITH '(' ai_with_options ')'
+{
+  $$ = $3;
+}
+;
+
+ai_with_options:
+ai_with_option
+{
+  $$ = $1;
+}
+| ai_with_options ',' ai_with_option
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+ai_with_option:
+relation_name COMP_EQ vec_index_param_value
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_WITH_OPTION, 2, $1, $3);
+}
+| relation_name COMP_EQ STRING_VALUE
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_WITH_OPTION, 2, $1, $3);
+}
+;
+
 opt_position_column:
 {
   $$ = NULL;
@@ -15358,43 +15403,6 @@ OPTIMIZE TABLE table_list
   malloc_non_terminal_node($$, result->malloc_pool_, T_OPTIMIZE_TABLE, 1, tables);
 }
 
-dump_memory_stmt:
-DUMP ENTITY ALL
-{
-  malloc_terminal_node($$, result->malloc_pool_, T_TEMPORARY);
-  $$->value_ = 0;
-  malloc_non_terminal_node($$, result->malloc_pool_, T_DUMP_MEMORY, 1, $$);
-}
-|
-DUMP ENTITY P_ENTITY COMP_EQ STRING_VALUE ',' SLOT_IDX COMP_EQ INTNUM
-{
-  malloc_non_terminal_node($$, result->malloc_pool_, T_TEMPORARY, 2, $5, $9);
-  $$->value_ = 1;
-  malloc_non_terminal_node($$, result->malloc_pool_, T_DUMP_MEMORY, 1, $$);
-}
-|
-DUMP CHUNK ALL
-{
-  malloc_terminal_node($$, result->malloc_pool_, T_TEMPORARY);
-  $$->value_ = 2;
-  malloc_non_terminal_node($$, result->malloc_pool_, T_DUMP_MEMORY, 1, $$);
-}
-|
-DUMP CHUNK CTX_ID COMP_EQ relation_name_or_string
-{
-  malloc_non_terminal_node($$, result->malloc_pool_, T_TEMPORARY, 1, $5);
-  $$->value_ = 3;
-  malloc_non_terminal_node($$, result->malloc_pool_, T_DUMP_MEMORY, 1, $$);
-}
-|
-DUMP CHUNK P_CHUNK COMP_EQ STRING_VALUE
-{
-  malloc_non_terminal_node($$, result->malloc_pool_, T_TEMPORARY, 1, $5);
-  $$->value_ = 4;
-  malloc_non_terminal_node($$, result->malloc_pool_, T_DUMP_MEMORY, 1, $$);
-}
-
-
 /*****************************************************************************
  *
  *	ALTER SYSTEM grammar
@@ -15477,12 +15485,6 @@ alter_with_opt_hint SYSTEM MINOR FREEZE opt_tablet_id
   malloc_terminal_node(type, result->malloc_pool_, T_INT);
   type->value_ = 2;
   malloc_non_terminal_node($$, result->malloc_pool_, T_FREEZE, 3, type, NULL, $5);
-}
-|
-alter_with_opt_hint SYSTEM REFRESH MEMORY STAT
-{
-  (void)($1);
-  malloc_non_terminal_node($$, result->malloc_pool_, T_REFRESH_MEMORY_STAT, 1, NULL);
 }
 |
 alter_with_opt_hint SYSTEM SWITCHOVER TO STANDBY

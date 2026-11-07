@@ -72,6 +72,14 @@ int ObCreateTableExecutor::prepare_stmt(ObCreateTableStmt &stmt,
   const int64_t timestamp = ObTimeUtility::current_time();
   obcall::ObCreateTableArg &create_table_arg = stmt.get_create_table_arg();
   create_table_name = create_table_arg.schema_.get_table_name_str();
+  {
+    int64_t ai_cnt = 0;
+    for (int64_t ci = 0; ci < create_table_arg.schema_.get_column_count(); ++ci) {
+      const ObColumnSchemaV2 *c = create_table_arg.schema_.get_column_schema_by_idx(ci);
+      if (OB_NOT_NULL(c) && c->is_ai_column()) { ai_cnt++; }
+    }
+    LOG_INFO("AICOL_DEBUG_EXECUTOR", K(ai_cnt), K(create_table_arg.schema_.get_column_count()));
+  }
   if (OB_FAIL(databuff_printf(buf, buf_len, pos, "__ctas_%ld_%ld", session_id, timestamp))) {
   } else {
     ObString tmp_table_name(pos, buf);

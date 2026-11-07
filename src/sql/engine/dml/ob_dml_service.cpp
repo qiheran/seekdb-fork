@@ -2179,6 +2179,12 @@ int ObDMLService::handle_after_processing_multi_row(ObDMLModifyRowsList *dml_mod
           } else if (OB_FAIL(TriggerHandle::do_handle_after_row(op, dml_ctdef.trig_ctdef_, dml_rtdef.trig_rtdef_, dml_event))) {
           }
         }
+        if (OB_SUCC(ret)) {
+          int ai_cap = op.ai_capture_rowkey(modify_row);
+          if (OB_SUCCESS != ai_cap) {
+            LOG_WARN("ai col rowkey capture failed", K(ai_cap));
+          }
+        }
       }
     }
 
@@ -2218,6 +2224,12 @@ int ObDMLService::handle_after_processing_single_row(ObDMLModifyRowNode &modify_
       }
     }
     if (OB_SUCC(ret) && OB_FAIL(TriggerHandle::do_handle_after_row(op, dml_ctdef.trig_ctdef_, dml_rtdef.trig_rtdef_, dml_event))) {
+    }
+    if (OB_SUCC(ret)) {
+      int ai_cap = op.ai_capture_rowkey(modify_row);
+      if (OB_SUCCESS != ai_cap) {
+        LOG_WARN("ai col rowkey capture failed", K(ai_cap));
+      }
     }
   }
   return ret;

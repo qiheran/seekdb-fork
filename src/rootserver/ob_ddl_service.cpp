@@ -17,6 +17,8 @@
 #define USING_LOG_PREFIX RS
 
 #include "share/rc/ob_server_runtime.h"
+#include "share/schema/ob_ai_column_meta.h"
+#include "share/ob_dml_sql_splicer.h"
 #include "config_bridge.h"
 #include <algorithm>
 #include "rootserver/ob_dependency_ddl_helper.h"
@@ -1292,6 +1294,15 @@ int ObDDLService::create_tables_in_trans(const bool if_not_exist,
   const uint64_t data_format_version = DATA_CURRENT_VERSION;
   ObArenaAllocator allocator(ObModIds::OB_RS_PARTITION_TABLE_TEMP);
   RS_TRACE(create_tables_in_trans_begin);
+  for (int64_t di = 0; di < table_schemas.count(); ++di) {
+    int64_t ai_cnt = 0;
+    ObTableSchema &ts = table_schemas.at(di);
+    for (int64_t ci = 0; ci < ts.get_column_count(); ++ci) {
+      const ObColumnSchemaV2 *c = ts.get_column_schema_by_idx(ci);
+      if (OB_NOT_NULL(c) && c->is_ai_column()) { ai_cnt++; }
+    }
+    LOG_INFO("AICOL_DEBUG_ROOTSERVER", K(ai_cnt), "col_cnt", ts.get_column_count(), "tbl", ts.get_table_name_str());
+  }
 
   DEBUG_SYNC(BEFOR_EXECUTE_CREATE_TABLE_WITH_FTS_INDEX);
 
@@ -1421,6 +1432,16 @@ int ObDDLService::create_tables_in_trans(const bool if_not_exist,
           table_schemas, ddl_operator, trans, schema_guard, data_format_version))) {
       }
       RS_TRACE(operator_create_table_end);
+    }
+    if (OB_SUCC(ret)) {
+      for (int64_t i = 0; OB_SUCC(ret) && i < table_schemas.count(); ++i) {
+        ObTableSchema &ai_table_schema = table_schemas.at(i);
+        if (ai_table_schema.has_ai_column()) {
+          if (OB_FAIL(create_ai_column_meta(ai_table_schema, trans))) {
+            LOG_WARN("fail to create ai column meta", K(ret));
+          }
+        }
+      }
     }
     DEBUG_SYNC(BEFORE_CREATE_TABLE_TRANS_COMMIT);
     if (OB_SUCC(ret)
@@ -7827,6 +7848,12 @@ int ObDDLService::add_new_column_to_table_schema(
       if (update_inner_table) {
         if (OB_FAIL(ddl_operator->insert_single_column(*trans,
                 new_table_schema, alter_column_schema))) {
+        } else if (alter_column_schema.is_ai_column()) {
+          if (OB_FAIL(create_ai_column_meta(new_table_schema, *trans,
+                  alter_column_schema.get_column_id()))) {
+            LOG_WARN("fail to create ai column meta on add column", K(ret),
+                     "column_id", alter_column_schema.get_column_id());
+          }
         }
       }
     }
@@ -23544,5 +23571,78 @@ int check_local_is_sys_leader()
   return ret;
 }
 
+int ObDDLService::create_ai_column_meta(ObTableSchema &table_schema, ObMySQLTransaction &trans, const uint64_t only_column_id)
+{
+  int ret = OB_SUCCESS;
+  ObArray<uint64_t> ai_col_ids;
+  for (int64_t i = 0; OB_SUCC(ret) && i < table_schema.get_column_count(); ++i) {
+    const ObColumnSchemaV2 *col = table_schema.get_column_schema_by_idx(i);
+    if (OB_NOT_NULL(col) && col->is_ai_column()
+        && (0 == only_column_id || col->get_column_id() == only_column_id)) {
+      if (OB_FAIL(ai_col_ids.push_back(col->get_column_id()))) {
+      }
+    }
+  }
+  for (int64_t i = 0; OB_SUCC(ret) && i < ai_col_ids.count(); ++i) {
+    const uint64_t col_id = ai_col_ids.at(i);
+    const ObColumnSchemaV2 *col = table_schema.get_column_schema(col_id);
+    if (OB_ISNULL(col) || !col->is_ai_column()) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      ObArenaAllocator tmp_alloc("AiColMeta", OB_MALLOC_NORMAL_BLOCK_SIZE);
+      ObAiColumnMeta meta;
+      ObString meta_buf = col->get_ai_meta();
+      if (OB_FAIL(parse_ai_meta(meta_buf, meta))) {
+        LOG_WARN("fail to parse ai meta", K(ret));
+      } else {
+        char deps_buf[1024] = {0};
+        int64_t deps_pos = 0;
+        for (int64_t d = 0; OB_SUCC(ret) && d < meta.dep_column_ids_.count(); ++d) {
+          if (d > 0) {
+            deps_buf[deps_pos++] = ',';
+          }
+          if (OB_FAIL(databuff_printf(deps_buf, sizeof(deps_buf), deps_pos, "%lu",
+                  static_cast<unsigned long>(meta.dep_column_ids_.at(d))))) {
+          }
+        }
+        ObDMLSqlSplicer splicer;
+        int64_t affected = 0;
+        common::ObSqlString sql;
+        if (OB_FAIL(ret)) {
+        } else if (OB_FAIL(splicer.add_pk_column("table_id", table_schema.get_table_id())) ||
+                   OB_FAIL(splicer.add_pk_column("column_id", col->get_column_id()))) {
+          LOG_WARN("add pk column failed", K(ret));
+        } else if (OB_FAIL(splicer.add_column("database_id", table_schema.get_database_id())) ||
+                   OB_FAIL(splicer.add_column("column_name", ObHexEscapeSqlStr(col->get_column_name_str()))) ||
+                   OB_FAIL(splicer.add_column("state_column_id", meta.state_col_id_)) ||
+                   OB_FAIL(splicer.add_column("request_column_id", meta.req_col_id_)) ||
+                   OB_FAIL(splicer.add_column("result_spec_column_id", meta.spec_col_id_)) ||
+                   OB_FAIL(splicer.add_column("state_column_name", ObHexEscapeSqlStr(meta.state_col_name_))) ||
+                   OB_FAIL(splicer.add_column("request_column_name", ObHexEscapeSqlStr(meta.req_col_name_))) ||
+                   OB_FAIL(splicer.add_column("result_spec_column_name", ObHexEscapeSqlStr(meta.spec_col_name_))) ||
+                   OB_FAIL(splicer.add_column("ai_func_type", ObString(AI_FUNC_EMBED == meta.func_kind_ ? "embed" : "complete"))) ||
+                   OB_FAIL(splicer.add_column("model_name", ObHexEscapeSqlStr(meta.model_name_))) ||
+                   OB_FAIL(splicer.add_column("result_type", static_cast<int64_t>(meta.result_kind_))) ||
+                   OB_FAIL(splicer.add_column("vector_dim", meta.vector_dim_)) ||
+                   OB_FAIL(splicer.add_column("max_retries", meta.max_retries_)) ||
+                   OB_FAIL(splicer.add_column("sync_mode", ObHexEscapeSqlStr(meta.sync_mode_))) ||
+                   OB_FAIL(splicer.add_column("normalized_expr", ObHexEscapeSqlStr(meta.normalized_expr_))) ||
+                   OB_FAIL(splicer.add_column("prompt_expr", ObHexEscapeSqlStr(meta.prompt_expr_))) ||
+                   OB_FAIL(splicer.add_column("spec_json", ObHexEscapeSqlStr(meta.spec_json_))) ||
+                   OB_FAIL(splicer.add_column("dep_column_ids", ObString(deps_pos, deps_buf))) ||
+                   OB_FAIL(splicer.add_gmt_create(ObTimeUtility::current_time())) || OB_FAIL(splicer.add_gmt_modified(ObTimeUtility::current_time()))) {
+          LOG_WARN("add column failed", K(ret));
+        } else if (OB_FAIL(splicer.splice_insert_sql("__all_ai_column", sql))) {
+          LOG_WARN("splice insert sql failed", K(ret));
+        } else if (OB_FAIL(trans.write(sql.ptr(), affected))) {
+          LOG_WARN("write ai column meta failed", K(ret), K(sql));
+        } else {
+          LOG_INFO("ai column meta created", K(table_schema.get_table_id()), K(col->get_column_id()));
+        }
+      }
+    }
+  }
+  return ret;
+}
 }  // namespace rootserver
 }  // namespace oceanbase

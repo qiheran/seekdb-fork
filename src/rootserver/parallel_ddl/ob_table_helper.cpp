@@ -211,6 +211,17 @@ int ObTableHelper::create_tables_(const ObString *ddl_stmt_str)
                 ddl_stmt_str,
                 true/*sync_schema_version_for_last_table*/))) {
     }
+    // persist AI column metadata (one row per AI column) in the same transaction
+    if (OB_SUCC(ret)) {
+      for (int64_t i = 0; OB_SUCC(ret) && i < new_tables_.count(); i++) {
+        ObTableSchema &ai_table = new_tables_.at(i);
+        if (ai_table.has_ai_column() && !is_inner_table(ai_table.get_table_id())) {
+          if (OB_FAIL(ddl_service_->create_ai_column_meta(ai_table, get_trans_()))) {
+            LOG_WARN("fail to create ai column meta", K(ret), "table_id", ai_table.get_table_id());
+          }
+        }
+      }
+    }
   }
   return ret;
 }

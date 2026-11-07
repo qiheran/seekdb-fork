@@ -936,8 +936,10 @@ int ObSysVariableSchema::load_default_system_variable()
     } else if (OB_FAIL(sysvar.set_max_val(ObSysVariables::get_max(i)))) {
     } else if (OB_FAIL(sysvar.set_info(ObSysVariables::get_info(i)))) {
     } else if (OB_FAIL(add_sysvar_schema(sysvar))) {
+      LOG_INFO("DEBUG bisect: add_sysvar_schema failed", K(ret), "name", ObSysVariables::get_name(i));
     }
   }
+  LOG_INFO("DEBUG bisect: load_default_system_variable leaving", K(ret));
   return ret;
 }
 

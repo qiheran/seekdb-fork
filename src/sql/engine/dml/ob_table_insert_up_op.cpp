@@ -372,7 +372,9 @@ int ObTableInsertUpOp::do_insert_up_cache()
         modify_row.new_row_ = insert_new_row;
         insert_rows++;
         if (OB_FAIL(replace_implict_cursor(insert_rows, 0, 0, 0))) {
-        } else if (need_after_row_process(ins_ctdef) && OB_FAIL(dml_modify_rows_.push_back(modify_row))) {
+        } else if ((need_after_row_process(ins_ctdef) || ai_capture_on_)) {
+          int ai_cap = ai_capture_rowkey(modify_row);
+          if (OB_SUCCESS != ai_cap) { LOG_WARN("ai col capture failed", K(ai_cap)); }
         } else if (is_first_insert_row && OB_FAIL(record_session_last_insert_id())) {
         } else {
           is_first_insert_row = false;
@@ -420,7 +422,9 @@ int ObTableInsertUpOp::do_insert_up_cache()
         modify_row.old_row_ = const_cast<ObChunkDatumStore::StoredRow *>(upd_old_row);
         modify_row.new_row_ = upd_new_row;
         if (OB_FAIL(conflict_checker_.update_row(upd_new_row, upd_old_row))) {
-        } else if (need_after_row_process(upd_ctdef) && OB_FAIL(dml_modify_rows_.push_back(modify_row))) {
+        } else if ((need_after_row_process(upd_ctdef) || ai_capture_on_)) {
+          int ai_cap = ai_capture_rowkey(modify_row);
+          if (OB_SUCCESS != ai_cap) { LOG_WARN("ai col capture failed", K(ai_cap)); }
         }
       } else {
         // create table t1(c1 int primary key, c2 timestamp default CURRENT_TIMESTAMP on update CURRENT_TIMESTAMP);
@@ -549,7 +553,9 @@ int ObTableInsertUpOp::try_insert_row(bool &is_skipped)
     } else if (ins_ctdef.is_table_without_pk_ &&
         OB_FAIL(ObDMLService::set_heap_table_hidden_pk(ins_ctdef, tablet_loc->tablet_id_, eval_ctx_))) {
     } else if (OB_FAIL(insert_row_to_das(ins_ctdef, ins_rtdef, tablet_loc, modify_row))) {
-    } else if (need_after_row_process(ins_ctdef) && OB_FAIL(dml_modify_rows_.push_back(modify_row))) {
+    } else if ((need_after_row_process(ins_ctdef) || ai_capture_on_)) {
+      int ai_cap = ai_capture_rowkey(modify_row);
+      if (OB_SUCCESS != ai_cap) { LOG_WARN("ai col capture failed", K(ai_cap)); }
     } 
   }
   return ret;

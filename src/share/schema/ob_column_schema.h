@@ -332,6 +332,11 @@ int assign(const ObColumnSchemaV2 &src_schema);
     add_column_flag(UNUSED_COLUMN_FLAG);
   }
 
+  inline bool is_ai_column() const { return is_ai_column_; }
+  inline void set_is_ai_column(const bool v) { is_ai_column_ = v; }
+  inline const common::ObString &get_ai_meta() const { return ai_meta_; }
+  inline int set_ai_meta(const common::ObString &meta) { is_ai_column_ = true; return deep_copy_str(meta, ai_meta_); }
+
   //other methods
   int64_t get_convert_size(void) const;
   void reset();
@@ -398,6 +403,8 @@ private:
   ObSkipIndexColumnAttr skip_index_attr_;
   int64_t lob_chunk_size_;
   share::ObLocalSessionVar local_session_vars_;
+  bool is_ai_column_;
+  common::ObString ai_meta_;
 };
 
 inline int32_t ObColumnSchemaV2::get_data_length() const

@@ -962,6 +962,10 @@ int check_will_be_having_domain_index_operation(
                             const bool need_check_tablet_cnt,
                             const uint64_t data_format_version,
                             const bool is_table_empty);
+public:
+  int create_ai_column_meta(share::schema::ObTableSchema &table_schema, ObMySQLTransaction &trans, const uint64_t only_column_id = 0);
+
+private:
   int create_tablets_in_trans_(common::ObIArray<share::schema::ObTableSchema> &table_schemas,
                               ObDDLOperator &ddl_operator,
                               ObMySQLTransaction &trans,
