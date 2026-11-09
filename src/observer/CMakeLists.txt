@@ -199,3 +199,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     add_subdirectory(ios/driver)
   endif()
 endif()
+
+# Optional AMD hipVS bridge (lib=hipvs); a no-op unless the ROCm/hipVS SDK is present.
+seekdb_configure_hipvs(seekdb)

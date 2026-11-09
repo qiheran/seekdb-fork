@@ -17,8 +17,22 @@
 #define USING_LOG_PREFIX LIB
 
 #include "ob_vsag_adaptor.h"
+#include "hipvs_backend.h"
+#include "hipvs_hnsw_import.h"
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <new>
+#include <string>
+#include <vector>
+#if defined(__linux__)
+#include <unistd.h>
+#endif
 #include <map>
 #include "vsag/vsag.h"
+#include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/dataset.h"
 #include "vsag/search_param.h"
@@ -954,6 +968,135 @@ int create_index(VectorIndexPtr &index_handler, IndexType index_type, const char
       }
     }
   }
+  return ret;
+}
+
+// Builds an entire HNSW snapshot with AMD hipVS and imports the resulting
+// stream into index_handler. An explicit lib=hipvs request never falls back to
+// a CPU build: any failure is reported to the caller.
+int build_hipvs_index(VectorIndexPtr &index_handler, const float *vectors,
+                      const int64_t *ids, int dim, int64_t rows)
+{
+  int ret = OB_SUCCESS;
+#if defined(__linux__)
+  HnswIndexHandler *hnsw = static_cast<HnswIndexHandler *>(index_handler);
+  if (OB_ISNULL(hnsw) || OB_ISNULL(vectors) || OB_ISNULL(ids) ||
+      rows <= 0 || rows > INT32_MAX || dim <= 0 || dim != hnsw->get_dim() ||
+      hnsw->get_index_type() != HNSW_TYPE || hnsw->get_extra_info_size() != 0 ||
+      std::strcmp(hnsw->get_metric(), "l2") != 0 ||
+      OB_ISNULL(hnsw->get_index().get()) || hnsw->get_index()->GetNumElements() != 0) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("[HIPVS] unsupported snapshot for GPU construction", K(ret), K(dim), K(rows));
+  } else if (hnsw->get_max_degree() < 5 || hnsw->get_max_degree() > 128 ||
+             hnsw->get_ef_construction() <= hnsw->get_max_degree()) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_WARN("[HIPVS] invalid HNSW construction parameters",
+             K(hnsw->get_max_degree()), K(hnsw->get_ef_construction()));
+  } else {
+    static HipvsBackend backend;
+    if (OB_ISNULL(backend.build_hnsw())) {
+      ret = OB_NOT_SUPPORTED;
+      LOG_WARN("[HIPVS] build bridge unavailable; CPU fallback is disabled",
+               KCSTRING(backend.error()));
+    } else {
+      char directory[] = "/tmp/seekdb-hipvs-XXXXXX";
+      if (OB_ISNULL(mkdtemp(directory))) {
+        ret = OB_IO_ERROR;
+        LOG_WARN("[HIPVS] cannot create a private export directory", K(errno));
+      } else {
+        char output[160] = {0};
+        char error[1024] = {0};
+        std::snprintf(output, sizeof(output), "%s/index.hnsw", directory);
+        const int build_ret = backend.build_hnsw()(
+            vectors, rows, dim, hnsw->get_max_degree(), hnsw->get_ef_construction(),
+            0 /* let the bridge read SEEKDB_HIPVS_BUILD_THREADS */, output, error,
+            sizeof(error));
+        if (build_ret != 0) {
+          ret = OB_ERR_VSAG_RETURN_ERROR;
+          LOG_WARN("[HIPVS] GPU build failed; CPU fallback is disabled", K(ret),
+                   K(build_ret), KCSTRING(error));
+        } else {
+          const uint64_t m = static_cast<uint64_t>(hnsw->get_max_degree());
+          const uint64_t stride = 12ULL + 8ULL * m + 4ULL * static_cast<uint64_t>(dim);
+          // Level zero plus at most max_level(<=64) upper layers per node.
+          const uint64_t max_length = 96ULL + static_cast<uint64_t>(rows) *
+              (stride + 4ULL + 64ULL * (4ULL + 4ULL * m));
+          std::ifstream input(output, std::ios::binary);
+          input.seekg(0, std::ios::end);
+          const std::streamoff length = input.tellg();
+          input.seekg(0, std::ios::beg);
+          if (!input || length < 96 || static_cast<uint64_t>(length) > max_length) {
+            ret = OB_IO_ERROR;
+            LOG_WARN("[HIPVS] unexpected exported graph size", K(ret), K(length), K(max_length));
+          } else {
+            std::vector<int8_t> bytes(static_cast<size_t>(length));
+            input.read(reinterpret_cast<char *>(bytes.data()), length);
+            std::string validation_error;
+            if (!input) {
+              ret = OB_IO_ERROR;
+              LOG_WARN("[HIPVS] cannot read the exported graph", K(ret));
+            } else if (!validate_and_remap_hipvs_hnsw(bytes, vectors, ids, rows, dim,
+                                                      hnsw->get_max_degree(), validation_error)) {
+              ret = OB_ERR_UNEXPECTED;
+              LOG_WARN("[HIPVS] invalid exported graph", K(ret), K(rows), K(dim),
+                       KCSTRING(validation_error.c_str()));
+            } else {
+              char params[1024] = {0};
+              if (OB_FAIL(construct_vsag_create_param(
+                      HNSW_TYPE, "float32", "l2", dim, hnsw->get_max_degree(),
+                      hnsw->get_ef_construction(), hnsw->get_ef_search(),
+                      hnsw->get_allocator(), 0, 0, 32, false, params))) {
+              } else {
+                auto candidate = vsag::Factory::CreateIndex(
+                    "hnsw", std::string(params), hnsw->get_allocator());
+                if (!candidate.has_value()) {
+                  ret = vsag_errcode2ob(candidate.error().type);
+                  LOG_WARN("[HIPVS] cannot create the import index", K(ret),
+                           KCSTRING(candidate.error().message.c_str()));
+                } else {
+                  vsag::Binary binary;
+                  binary.size = bytes.size();
+                  binary.data.reset(new (std::nothrow) int8_t[bytes.size()]);
+                  if (OB_ISNULL(binary.data.get())) {
+                    ret = OB_ALLOCATE_MEMORY_FAILED;
+                  } else {
+                    std::memcpy(binary.data.get(), bytes.data(), bytes.size());
+                    vsag::BinarySet set;
+                    set.Set(vsag::HNSW_DATA, binary);
+                    auto loaded = candidate.value()->Deserialize(set);
+                    if (!loaded.has_value()) {
+                      ret = vsag_errcode2ob(loaded.error().type);
+                      LOG_WARN("[HIPVS] VSAG import failed", K(ret),
+                               KCSTRING(loaded.error().message.c_str()));
+                    } else if (candidate.value()->GetNumElements() != rows) {
+                      ret = OB_ERR_UNEXPECTED;
+                      LOG_WARN("[HIPVS] imported graph element count mismatch", K(ret),
+                               K(rows), K(candidate.value()->GetNumElements()));
+                    } else {
+                      // Publish only after every row and label has been validated.
+                      hnsw->set_index(candidate.value());
+                      LOG_INFO("[HIPVS] GPU HNSW imported; CPU level-zero rebuild skipped",
+                               K(rows), K(dim), K(hnsw->get_max_degree()));
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        unlink(output);
+        rmdir(directory);
+      }
+    }
+  }
+#else
+  UNUSED(index_handler);
+  UNUSED(vectors);
+  UNUSED(ids);
+  UNUSED(dim);
+  UNUSED(rows);
+  ret = OB_NOT_SUPPORTED;
+#endif
   return ret;
 }
 
