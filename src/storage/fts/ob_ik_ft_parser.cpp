@@ -41,6 +41,7 @@ namespace oceanbase
 {
 namespace storage
 {
+
 int ObIKFTParser::init(const ObFTParserParam &param)
 {
   int ret = OB_SUCCESS;

@@ -387,6 +387,7 @@ int ObDASLegacyTRMergeIter::create_sparse_retrieval_iter()
                                     ? nullptr
                                     : ir_ctdef_->match_filter_;
   sr_iter_param_.topk_limit_ = topk_limit_;
+  sr_iter_param_.count_only_ = ir_rtdef_->is_count_only();
   if (OB_NOT_NULL(ir_ctdef_->field_boost_expr_)) {
     ObDatum *boost_datum = nullptr;
     if (OB_FAIL(ir_ctdef_->field_boost_expr_->eval(*ir_rtdef_->eval_ctx_, boost_datum))) {
